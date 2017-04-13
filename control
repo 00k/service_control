@@ -1,0 +1,121 @@
+#!/bin/bash
+
+START_RETRY_TIMES=60
+STOP_RETRY_TIMES=600
+NORMAL_KILL_TIMES=300
+RETRY_INTERVAL=1
+
+function print_help {
+    echo "Usage: $1 start <process_name> <listen_port> <start_cmd>"
+    echo "       $1 stop <process_name> <listen_port>"
+    echo "       $1 status <process_name> <listen_port>"
+}
+
+function get_pid_by_program_port {
+    text=$(netstat -tlpn 2>/dev/null | awk '{if($6=="LISTEN") print $4,$7}')
+    while read addr process; do
+        program=${process#*/}
+        _pid_ret=${process%%/*}
+        port=${addr##*:}
+        if [[ "X$program" == "X$1" && $port -eq $2 ]]; then
+            eval "$3=$_pid_ret"
+            return 0
+            break
+        fi
+    done <<< "$text"
+    return 1
+}
+
+function get_pgid_by_program_port {
+    pid=0
+    if ! get_pid_by_program_port $1 $2 pid ; then
+        return 1
+    fi
+    _pgid_ret=`ps -eo comm,pid,pgid 2>/dev/null | awk -v program=$1 -v pid=$pid '{if($1==program && $2==pid) print $3}'`
+    if [[ "X$_pgid_ret" != "X" ]]; then
+        eval "$3=$_pgid_ret"
+        return 0
+    fi
+    return 1
+}
+
+function check_process {
+    pid=0
+    get_pid_by_program_port $1 $2 pid
+    running=$?
+    if [[ $running -eq 0 ]]; then
+        echo "$1 (LISTEN $2) (PID $pid) is running ..."
+    else
+        echo "$1 (LISTEN $2) is stopped"
+    fi 
+    return $running
+}
+
+function start_process {
+    if check_process $1 $2 ; then
+        echo "Starting $1 (LISTEN $2): program is running"
+        return 2
+    fi
+    echo "Starting $1 (LISTEN $2) ..."
+    eval nohup $3 </dev/null &> $4 &
+    retry=0
+    while ((1)); do
+        if check_process $1 $2 ; then
+            echo "Starting $1 (LISTEN $2): success"
+            return 0
+        fi
+        ((retry++))
+        if [[  $retry -gt $START_RETRY_TIMES ]]; then
+            break
+        fi
+        sleep $RETRY_INTERVAL
+    done
+    echo "Starting $1 (LISTEN $2): timeout"
+    return 1
+}
+
+function stop_process {
+    if ! check_process $1 $2 ; then
+        echo "Stopping $1 (LISTEN $2): program not started"
+        return 2
+    fi
+    echo "Stopping $1 (LISTEN $2) ..."
+    retry=0
+    while ((1)); do
+        pgid=0
+        if get_pgid_by_program_port $1 $2 pgid ; then
+            if [[ $retry -lt $NORMAL_KILL_TIMES ]]; then
+                kill -- -$pgid
+            else
+                kill -9 -- -$pgid
+            fi
+        fi
+        if ! check_process $1 $2 ; then
+            echo "Stopping $1 (LISTEN $2): success"
+            return 0
+        fi
+        ((retry++))
+        if [[ $retry -gt $STOP_RETRY_TIMES ]]; then
+            break
+        fi
+        sleep $RETRY_INTERVAL
+    done
+    echo "Stopping $1 (LISTEN $2): timeout"
+    return 1
+}
+    
+if [[ $# -eq 0 || $# -eq 1 && $1 == "help" ]]; then
+    print_help $0
+    exit 0
+fi
+
+if [[ $1 == "start" && $# -eq 5 ]]; then
+    start_process $2 $3 "$4" $5
+elif [[ $1 == "stop" && $# -eq 3 ]]; then
+    stop_process $2 $3
+elif [[ $1 == "status" && $# -eq 3 ]]; then
+    check_process $2 $3
+else
+    print_help $0
+    exit 1
+fi
