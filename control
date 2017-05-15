@@ -1,9 +1,17 @@
 #!/bin/bash
 
-START_RETRY_TIMES=60
-STOP_RETRY_TIMES=600
-NORMAL_KILL_TIMES=300
-RETRY_INTERVAL=1
+if [[ -z $START_RETRY_TIMES ]]; then
+    START_RETRY_TIMES=60
+fi
+if [[ -z $STOP_RETRY_TIMES ]]; then
+    STOP_RETRY_TIMES=600
+fi
+if [[ -z $NORMAL_KILL_TIMES ]]; then
+    NORMAL_KILL_TIMES=300
+fi
+if [[ -z $RETRY_INTERVAL ]]; then
+    RETRY_INTERVAL=1
+fi
 
 function print_help {
     echo "Usage: $1 start <process_name> <listen_port> <start_cmd>"
